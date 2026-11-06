@@ -1,0 +1,24 @@
+{
+  "scenario": "scenarios\\box_v2.ru.yaml",
+  "scenario_id": "box_v2",
+  "scenario_version": "c002a3d45b22",
+  "models": [
+    "deepseek/deepseek-v4.1-flash-1017"
+  ],
+  "episodes": 1,
+  "request": {
+    "provider": {
+      "require_parameters": true,
+      "order": [
+        "relace"
+      ],
+      "allow_fallbacks": false
+    },
+    "reasoning": {
+      "effort": "medium"
+    }
+  },
+  "max_turns": 40,
+  "debrief": true,
+  "started": "2026-11-06T22:06:31.640525"
+}

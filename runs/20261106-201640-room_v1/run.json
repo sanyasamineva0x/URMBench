@@ -1,0 +1,24 @@
+{
+  "scenario": "scenarios\\room_v1.ru.yaml",
+  "scenario_id": "room_v1",
+  "scenario_version": "5839e74ce3ff",
+  "models": [
+    "deepseek/deepseek-v4.1-flash-1017"
+  ],
+  "episodes": 5,
+  "request": {
+    "provider": {
+      "require_parameters": true,
+      "order": [
+        "relace"
+      ],
+      "allow_fallbacks": false
+    },
+    "reasoning": {
+      "effort": "medium"
+    }
+  },
+  "max_turns": 40,
+  "debrief": true,
+  "started": "2026-11-06T20:16:40.389449"
+}

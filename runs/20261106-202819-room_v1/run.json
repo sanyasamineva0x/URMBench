@@ -1,0 +1,20 @@
+{
+  "scenario": "scenarios\\room_v1.ru.yaml",
+  "scenario_id": "room_v1",
+  "scenario_version": "c22b76e4a8d1",
+  "models": [
+    "anthropic/claude-sonnet-5.5"
+  ],
+  "episodes": 1,
+  "request": {
+    "provider": {
+      "require_parameters": true
+    },
+    "reasoning": {
+      "effort": "medium"
+    }
+  },
+  "max_turns": 40,
+  "debrief": true,
+  "started": "2026-11-06T20:28:19.217032"
+}

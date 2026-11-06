@@ -1,0 +1,20 @@
+{
+  "scenario": "scenarios\\box_v1.ru.yaml",
+  "scenario_id": "box_v1",
+  "scenario_version": "44f04992648d",
+  "models": [
+    "z-ai/glm-5.3-flash"
+  ],
+  "episodes": 1,
+  "request": {
+    "provider": {
+      "require_parameters": true
+    },
+    "reasoning": {
+      "effort": "medium"
+    }
+  },
+  "max_turns": 40,
+  "debrief": true,
+  "started": "2026-11-06T21:29:58.069314"
+}
