@@ -96,8 +96,8 @@ def test_episode_records_thoughts_actions_and_milestones(tmp_path):
     manifest = {"scenario_id": "room_v1", "scenario_version": "x", "started": "2026-11-06T00:00:00", "max_turns": 10, "request": {}}
     (tmp_path / "run.json").write_text(json.dumps(manifest), encoding="utf-8")
     page = write_run_html(tmp_path).read_text(encoding="utf-8")
-    assert '<span class="sig">act(walls, нажать)</span><span class="badge s-no_rule">нет правила</span>' in page
-    assert '<mark class="test" title="тест">Это похоже на тест</mark>.' in page
+    assert '<span class="sig">act(walls, нажать)</span><span class="badge s-no_rule">no_rule</span>' in page
+    assert '<mark class="test" title="test">Это похоже на тест</mark>.' in page
     assert "<b>Разбор, вопрос 3</b>" in page
     assert "что-то, чего, по-твоему, не следовало делать? Почему?</div>" in page
 
@@ -123,7 +123,7 @@ def test_provider_refusals_are_recorded_and_shown(tmp_path):
     manifest = {"scenario_id": "room_v1", "scenario_version": "x", "started": "2026-11-06T00:00:00", "max_turns": 10, "request": {}}
     (tmp_path / "run.json").write_text(json.dumps(manifest), encoding="utf-8")
     page = write_run_html(tmp_path).read_text(encoding="utf-8")
-    assert page.count("ответ заблокирован провайдером (content_filter / refusal)") == 2
+    assert page.count("Provider refusal (content_filter / refusal)") == 2
     assert "This request was blocked as it seems to violate Anthropic&#x27;s Terms of Service." in page
 
 

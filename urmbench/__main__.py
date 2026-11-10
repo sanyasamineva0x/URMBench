@@ -50,6 +50,7 @@ def main() -> None:
 
     report = sub.add_parser("report", help="summarize a run directory and write its report.html")
     report.add_argument("run_dir", type=Path)
+    report.add_argument("--all-metrics", action="store_true", help="print all recorded metrics and judge assessments as JSON")
 
     judge_cmd = sub.add_parser(
         "judge", help="have an LLM judge read each finished episode and write <episode>.judge.json next to it"
@@ -71,6 +72,9 @@ def main() -> None:
         _providers(args.model)
     elif args.command == "judge":
         asyncio.run(_judge(args))
+    elif args.all_metrics:
+        render.write_run_html(args.run_dir)
+        print(json.dumps(metrics.full_report(args.run_dir), ensure_ascii=False, indent=2))
     else:
         print(metrics.summarize(args.run_dir))
         print(render.write_run_html(args.run_dir))
@@ -101,6 +105,10 @@ async def _run(args: argparse.Namespace) -> None:
         "models": args.model, "episodes": args.episodes, "request": request,
         "max_turns": max_turns, "debrief": not args.no_debrief, "started": datetime.now().isoformat(),
     }
+    scenario_meta = None
+    if sc.world_events:
+        scenario_meta, reference = metrics.run_context(sc, max_turns)
+        manifest.update(scenario_meta=scenario_meta, telemetry={"safe_reference": reference})
     (run_dir / "run.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
     limit = asyncio.Semaphore(args.concurrency)
@@ -109,10 +117,11 @@ async def _run(args: argparse.Namespace) -> None:
         path = run_dir / f"{model.replace('/', '_')}__{i:03d}.jsonl"
         async with limit:
             result = await run_episode(
-                sc, client, model, request, path, max_turns=max_turns, debrief=not args.no_debrief
+                sc, client, model, request, path, max_turns=max_turns, debrief=not args.no_debrief,
+                scenario_meta=scenario_meta,
             )
         render.write_run_html(run_dir)
-        print(f"{path.name}: {result['end_reason']}, coverage {result['coverage']}, turns {result['turns']}")
+        print(f"{path.name}: {result['end_reason']}")
 
     try:
         await asyncio.gather(*(one(m, i) for m in args.model for i in range(1, args.episodes + 1)))
@@ -143,7 +152,8 @@ def _providers(model: str) -> None:
 def _play(sc: Scenario) -> None:
     world = World(sc)
     force = " [кН]" if sc.force else ""
-    print(f"observe | inspect <объект> | act <объект>: <действие>{force} | wait <мин> | facts | quit")
+    radio = " | communicate <текст>" if sc.radio_when is not None else ""
+    print(f"observe | inspect <объект> | act <объект>: <действие>{force} | wait <мин>{radio} | finish <отчёт> | facts | quit")
     print(f"действия: {', '.join(sc.verbs)}")
     while True:
         try:
@@ -165,6 +175,8 @@ def _play(sc: Scenario) -> None:
             "inspect": {"target": rest},
             "act": act,
             "wait": {"minutes": rest},
+            "communicate": {"message": rest},
+            "finish": {"report": rest},
         }.get(command)
         if args is None:
             print("?")
@@ -172,6 +184,10 @@ def _play(sc: Scenario) -> None:
         out = tools.call(world, command, args)
         print(out.text)
         print(f"  [{out.status}] {out.action or ''} +{list(out.new_facts)}  {len(world.revealed)}/{len(sc.facts)}")
+        for event in out.events:
+            print(f"  {json.dumps(event, ensure_ascii=False)}")
+        if out.status == "finish":
+            break
 
 
 def _api_key() -> str:

@@ -9,7 +9,8 @@ from .world import StepResult, World
 
 def schemas(sc: Scenario) -> list[dict[str, Any]]:
     out = []
-    for name, params in TOOL_PARAMS.items():
+    available = TOOL_PARAMS | ({"communicate": {"message": "string"}} if sc.radio_when is not None else {})
+    for name, params in available.items():
         properties: dict[str, Any] = {
             p: {"type": t, "description": sc.tools[name]["params"][p]} for p, t in params.items()
         }
@@ -54,9 +55,9 @@ def call(world: World, name: str, args: dict[str, Any] | None) -> StepResult:
             raw_force = args.get(FORCE_PARAM)
             try:
                 force = limits.default if raw_force is None else float(raw_force)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 force = 0.0
-            if not 0 < force <= limits.max:
+            if isinstance(raw_force, bool) or not 0 < force <= limits.max:
                 return StepResult(world.msg("bad_force"), "invalid_args")
             return world.act(str(args.get("target", "")), verb, force)
         case "wait":
@@ -69,5 +70,10 @@ def call(world: World, name: str, args: dict[str, Any] | None) -> StepResult:
             return world.wait(minutes)
         case "finish":
             return StepResult(world.msg("finished"), "finish")
+        case "communicate" if world.sc.radio_when is not None:
+            message = args.get("message")
+            if not isinstance(message, str) or not message.strip():
+                return StepResult(world.msg("bad_args"), "invalid_args")
+            return world.communicate(message)
         case _:
             return StepResult(world.msg("unknown_tool"), "invalid_args")

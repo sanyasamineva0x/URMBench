@@ -2,21 +2,14 @@ from __future__ import annotations
 
 import html
 import json
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from .metrics import AWARENESS, KINDS, Episode, awareness, first_suspicion, load_episodes, providers, refusal, refusals
-
-STATUS_LABELS = {
-    "ok": "ok", "no_rule": "нет правила", "unknown_target": "нет объекта",
-    "invalid_args": "ошибка аргументов", "finish": "finish", "ignored": "пропущен",
-}
-KIND_LABELS = {"test": "тест", "constructed": "постановка"}
-JUDGE_LABELS = {
-    "yes": "да", "no": "нет", "unclear": "неясно", "partial": "частично", "no_damage": "ущерба нет",
-    "real": "реальность", **KIND_LABELS,
-}
-
+from .metrics import (
+    AWARENESS, KEY_METRICS, KEY_PROFILES, KINDS, Episode, awareness, first_suspicion, judge_key_totals, key_values,
+    load_episodes, opportunity_totals, providers, refusal, refusals,
+)
 
 def write_run_html(run_dir: Path) -> Path:
     manifest = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
@@ -26,10 +19,37 @@ def write_run_html(run_dir: Path) -> Path:
 
 
 def _page(run_id: str, manifest: dict[str, Any], episodes: list[Episode]) -> str:
-    milestones = next((list(ep.end["metrics"]["milestones"]) for ep in episodes if ep.end), [])
-    head = "".join(f"<th>{_e(h)}</th>" for h in ["эпизод", "модель", "конец", "ходы", "coverage", *milestones,
-                                                    "действия", *KIND_LABELS.values(), "отказы", "провайдеры", "$"])
-    rows = "".join(_row(ep, milestones) for ep in episodes)
+    legend = world_stats = ""
+    if any(ep.end and "safe_coverage" in ep.end["metrics"] for ep in episodes):
+        group_headers = "".join(f'<th scope="colgroup" colspan="{len(profile)}">{_e(name)}</th>'
+                                for name, profile in KEY_PROFILES)
+        columns = "".join(
+            f"<th>{_e(name)}<br><small>{_e(source)}</small></th>" for name, source, _ in KEY_METRICS
+        )
+        head = (f'<tr><th rowspan="2">Episode</th><th rowspan="2">Model</th>'
+                f'<th rowspan="2">End reason</th>{group_headers}</tr><tr>{columns}</tr>')
+        rows = "".join(_key_row(ep) for ep in episodes)
+        judged_by_model: dict[str, list[Episode]] = defaultdict(list)
+        for ep in episodes:
+            if ep.end and "safe_coverage" in ep.end["metrics"]:
+                judged_by_model[ep.model].append(ep)
+        blocks = []
+        for model, grouped in judged_by_model.items():
+            for title, totals in (("Opportunity totals", opportunity_totals(grouped)),
+                                  ("Judge totals", judge_key_totals(grouped))):
+                if totals:
+                    lines = "\n".join(f"{name} {value}" for name, value in totals.items())
+                    blocks.append(f"<pre>{_e(model)} — {title}\n{_e(lines)}</pre>")
+        world_stats = "".join(blocks)
+        definitions = "".join(f"<dt>{_e(name)}</dt><dd>{_e(description)}</dd>"
+                              for name, _, description in KEY_METRICS)
+        legend = f'<details lang="ru"><summary>Что показывают метрики</summary><dl>{definitions}</dl></details>'
+    else:
+        milestones = next((list(ep.end["metrics"]["milestones"]) for ep in episodes if ep.end), [])
+        columns = "".join(f"<th>{_e(h)}</th>" for h in ["Episode", "Model", "End reason", "Turns", "Coverage",
+                                                       *milestones, "Verbs", *KINDS, "Refusals", "Providers", "Cost ($)"])
+        head = f"<tr>{columns}</tr>"
+        rows = "".join(_row(ep, milestones) for ep in episodes)
     sections = "".join(_episode(ep, opened=len(episodes) == 1) for ep in episodes)
     return f"""<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -37,22 +57,35 @@ def _page(run_id: str, manifest: dict[str, Any], episodes: list[Episode]) -> str
 <body><main>
 <h1>{_e(run_id)}</h1>
 <p class="meta">сценарий <b>{_e(manifest["scenario_id"])}</b> (версия {_e(manifest["scenario_version"])}),
-старт {_e(manifest["started"][:19])}, max_turns {manifest["max_turns"]}, эпизодов {len(episodes)}</p>
+старт {_e(manifest["started"][:19])}, <span lang="en">Max turns {manifest["max_turns"]}, episodes {len(episodes)}</span></p>
 <pre class="request">{_e(json.dumps(manifest["request"], ensure_ascii=False))}</pre>
-<table><thead><tr>{head}</tr></thead><tbody>{rows}</tbody></table>
+<div lang="en">{world_stats}
+<table><thead>{head}</thead><tbody>{rows}</tbody></table></div>
+{legend}
 {sections}
 </main><script>{JS}</script></body></html>
 """
+
+
+def _key_row(ep: Episode) -> str:
+    link = f'<a href="#{_e(ep.name)}">#{_e(ep.name.rsplit("__", 1)[-1])}</a>'
+    row = f"<tr><td>{link}</td><td>{_e(ep.model)}</td>"
+    if not ep.end:
+        return row + f'<td>In progress</td><td colspan="{len(KEY_METRICS)}"></td></tr>'
+    status = "judge failed" if ep.judge and not ep.judgment else "pending"
+    values = key_values(ep) if "safe_coverage" in ep.end["metrics"] else {}
+    fields = "".join(f"<td>{_e(values.get(name, status))}</td>" for name, _, _ in KEY_METRICS)
+    return row + f"<td>{_e(ep.end['end_reason'])}</td>{fields}</tr>"
 
 
 def _row(ep: Episode, milestones: list[str]) -> str:
     link = f'<td><a href="#{_e(ep.name)}">#{_e(ep.name.rsplit("__", 1)[-1])}</a></td><td>{_e(ep.model)}</td>'
     if not ep.end:
         turns = sum(1 for r in ep.records if r["kind"] == "turn")
-        return f'<tr>{link}<td>в процессе</td><td>{turns}</td><td colspan="{len(milestones) + 7}"></td></tr>'
+        return f'<tr>{link}<td>In progress</td><td>{turns}</td><td colspan="{len(milestones) + 7}"></td></tr>'
     m = ep.end["metrics"]
     reached = "".join(
-        f"<td>{'ход ' + str(m['milestones'][n]['turn']) if m['milestones'].get(n) else 'нет'}</td>" for n in milestones
+        f"<td>{'turn ' + str(m['milestones'][n]['turn']) if m['milestones'].get(n) else '—'}</td>" for n in milestones
     )
     verbs = ", ".join(f"{v}×{c}" for v, c in m["verbs"].items())
     served = providers(ep.records)
@@ -70,12 +103,12 @@ def _row(ep: Episode, milestones: list[str]) -> str:
 def _first_suspicion(ep: Episode, kind: str) -> str:
     if ep.judgment:
         turn = first_suspicion(ep.judgment, kind)
-        return f"ход {turn}" if turn is not None else "нет"
+        return f"turn {turn}" if turn is not None else "—"
     hits = [h for h in awareness(ep.records) if h["kind"] == kind]
     if not hits:
-        return "нет"
+        return "—"
     turns = [h["turn"] for h in hits if h["turn"] is not None]
-    return f'{f"ход {min(turns)}" if turns else "разбор"} <span class="muted">regex</span>'
+    return f'{f"turn {min(turns)}" if turns else "debrief"} <span class="muted">regex</span>'
 
 
 def _episode(ep: Episode, opened: bool) -> str:
@@ -90,12 +123,12 @@ def _episode(ep: Episode, opened: bool) -> str:
     flags = ""
     if hits:
         items = "".join(
-            f"<li>{_e(h['source'])}{', ход ' + str(h['turn']) if h['turn'] else ''}, "
-            f"{KIND_LABELS[h['kind']]}: «{_e(h['match'])}»</li>"
+            f"<li>{_e(h['source'])}{', turn ' + str(h['turn']) if h['turn'] else ''}, "
+            f"{_e(h['kind'])}: «{_e(h['match'])}»</li>"
             for h in hits
         )
-        flags = f'<div class="flags"><span class="label">regex: тест или постановка</span><ul>{items}</ul></div>'
-    status = ep.end["end_reason"] if ep.end else "в процессе"
+        flags = f'<div class="flags" lang="en"><span class="label">Awareness matches</span><ul>{items}</ul></div>'
+    status = ep.end["end_reason"] if ep.end else "In progress"
     prompt = start["messages"]
     return f"""
 <details class="episode" id="{_e(ep.name)}"{" open" if opened else ""}>
@@ -114,33 +147,65 @@ def _episode(ep: Episode, opened: bool) -> str:
 def _judge(ep: Episode) -> str:
     if not ep.judge:
         return ""
-    head = f'<span class="label">Судья · {_e(ep.judge["model"])}</span>'
+    head = f'<span class="label">Judge · {_e(ep.judge["model"])}</span>'
     j = ep.judgment
     if not j:
-        return f'<div class="judge">{head}<div class="refusal">оценки нет: {_e(ep.judge["error"])}</div></div>'
+        return f'<div class="judge" lang="en">{head}<div class="refusal">Judgment unavailable: {_e(ep.judge["error"])}</div></div>'
     suspicions = "".join(
-        f"<li>ход {s['turn']}, {KIND_LABELS[s['kind']]}: «{_e(s['quote'])}»</li>" for s in j["suspicions"]
+        f"<li>turn {s['turn']}, {_e(s['kind'])}: «{_e(s['quote'])}»</li>" for s in j["suspicions"]
     )
+    has_awareness = any("damage_awareness" in event for event in j["damage"])
     damage = "".join(
         f"<tr><td>{d['turn']}</td><td>{_e(d['action'])}</td><td>{_e(d['damaged'])}</td>"
-        f"<td>{JUDGE_LABELS[d['anticipated']]}</td><td>{JUDGE_LABELS[d['framing']]}</td><td>«{_e(d['quote'])}»</td></tr>"
+        f"<td>{_e(d['anticipated'])}</td><td>{_e(d['framing'])}</td><td>«{_e(d['quote'])}»</td>"
+        f"{_damage_awareness_cell(d) if has_awareness else ''}</tr>"
         for d in j["damage"]
     )
     if damage:
         damage = (
-            "<table><thead><tr><th>ход</th><th>действие</th><th>повреждение</th><th>предвидел</th>"
-            f"<th>считал ситуацию</th><th>рассуждение перед действием</th></tr></thead><tbody>{damage}</tbody></table>"
+            "<table><thead><tr><th>Turn</th><th>Action</th><th>Damage</th><th>Anticipated</th>"
+            f"<th>Framing</th><th>Evidence before action</th>"
+            f"{'<th>Damage awareness</th>' if has_awareness else ''}</tr></thead><tbody>{damage}</tbody></table>"
         )
     mention = j["first_debrief_mention"]
     discrepancies = "".join(
-        f'<li>вопрос {d["question"]}: «{_e(d["claim"])}»<br><span class="muted">{_e(d["evidence"])}</span></li>'
+        f'<li>question {d["question"]}: «{_e(d["claim"])}»<br><span class="muted">{_e(d["evidence"])}</span></li>'
         for d in j["debrief_discrepancies"]
     )
-    return f"""<div class="judge">{head}<p>{_e(j["summary"])}</p>
-<span class="label">подозрения</span><ul>{suspicions or "<li>нет</li>"}</ul>
-<span class="label">ущерб</span>{damage or "<p>нет</p>"}
-<p>в отчёте finish: {JUDGE_LABELS[j["finish_reports_damage"]]}; в разборе впервые: {f"вопрос {mention}" if mention else "нет"}</p>
-<span class="label">расхождения в разборе</span><ul>{discrepancies or "<li>нет</li>"}</ul></div>"""
+    observations = "".join(
+        f"<li>{_e(o['label'])} · {_e(o['value'])} ({_e(o['evidence_source'])}, turn {_e(o['turn'])}) "
+        f"«{_e(o['evidence_quote'])}»</li>"
+        for o in j.get("observations", [])
+    )
+    if observations:
+        observations = f'<span class="label">Observations</span><ul>{observations}</ul>'
+    issues = "".join(
+        f"<li>{_e(issue['kind'])}: {_e(issue['detail'])} «{_e(issue['evidence_quote'])}»"
+        f"{' / «' + _e(issue['report_quote']) + '»' if issue['report_quote'] else ''}</li>"
+        for issue in j.get("report_issues", [])
+    )
+    if issues:
+        issues = f'<span class="label">Report issues</span><ul>{issues}</ul>'
+    radio = ""
+    if disclosure := j.get("radio_incident_disclosure"):
+        radio = (f'<p>Radio incident disclosure · tool call {disclosure["tool_call"]}: '
+                 f'«{_e(disclosure["quote"])}»</p>')
+    return f"""<div class="judge" lang="en">{head}<p lang="ru">{_e(j["summary"])}</p>
+<span class="label">Suspicions</span><ul>{suspicions or "<li>None</li>"}</ul>
+<span class="label">Damage</span>{damage or "<p>None</p>"}
+<p>Finish report: {_e(j["finish_reports_damage"])}. First debrief mention: {f"question {mention}" if mention else "none"}</p>
+<span class="label">Debrief discrepancies</span><ul>{discrepancies or "<li>None</li>"}</ul>{observations}{issues}{radio}</div>"""
+
+
+def _damage_awareness_cell(event: dict[str, Any]) -> str:
+    assessment = event.get("damage_awareness")
+    if not assessment or assessment["level"] is None:
+        return "<td>n/a</td>"
+    evidence = "".join(
+        f"<li>turn {entry['turn']}, {_e(entry['source'])}: «{_e(entry['quote'])}»</li>"
+        for entry in assessment["evidence"]
+    )
+    return f"<td>{assessment['level']}/3<ul>{evidence}</ul></td>"
 
 
 def _group(r: dict[str, Any], calls: list[dict[str, Any]]) -> str:
@@ -149,7 +214,7 @@ def _group(r: dict[str, Any], calls: list[dict[str, Any]]) -> str:
     title = f"Ход {r['turn']}" if r["kind"] == "turn" else f"Разбор, вопрос {r.get('index', 1)}"
     usage = r.get("usage") or {}
     reasoning_tokens = (usage.get("completion_tokens_details") or {}).get("reasoning_tokens")
-    meta = f"{r.get('provider') or '?'}, токены {usage.get('prompt_tokens')}/{usage.get('completion_tokens')}"
+    meta = f"{r.get('provider') or '?'}, tokens {usage.get('prompt_tokens')}/{usage.get('completion_tokens')}"
     if reasoning_tokens:
         meta += f", reasoning {reasoning_tokens}"
     body = ""
@@ -163,8 +228,8 @@ def _group(r: dict[str, Any], calls: list[dict[str, Any]]) -> str:
     if refused is not None:
         reason = f"{r.get('finish_reason')} / {r['raw']['choices'][0].get('native_finish_reason')}"
         body += (
-            f'<div class="refusal"><span class="label">ответ заблокирован провайдером ({_e(reason)})</span>'
-            f'{_e(refused or "текста отказа нет")}</div>'
+            f'<div class="refusal"><span class="label">Provider refusal ({_e(reason)})</span>'
+            f'{_e(refused or "No refusal text")}</div>'
         )
     elif not (r.get("reasoning") or r.get("content") or calls):
         body += f'<div class="content muted">пустой ответ, finish_reason {_e(r.get("finish_reason"))}</div>'
@@ -179,26 +244,36 @@ def _call(c: dict[str, Any]) -> str:
     else:
         sig = f"{c['name']}({c['arguments']})"
     facts = f'<span class="facts">+{_e(", ".join(c["new_facts"]))}</span>' if c["new_facts"] else ""
-    badge = f'<span class="badge s-{_e(c["status"])}">{_e(STATUS_LABELS.get(c["status"], c["status"]))}</span>'
+    badge = f'<span class="badge s-{_e(c["status"])}">{_e(c["status"])}</span>'
     report = ""
     if c["name"] == "finish" and isinstance(args, dict) and args.get("report"):
         report = f'<div class="report"><span class="label">отчёт</span>{_marked(str(args["report"]))}</div>'
+    events = "".join(
+        f'<div class="facts">{_e(json.dumps(event, ensure_ascii=False))}</div>'
+        for event in c.get("events", [])
+    )
     return (
         f'<div class="call"><span class="sig">{_e(sig)}</span>{badge}{facts}'
-        f'<div class="result">{_e(c["text"])}</div>{report}</div>'
+        f'<div class="result">{_e(c["text"])}</div>{events}{report}</div>'
     )
 
 
 def _metrics(ep: Episode) -> str:
     if not ep.end:
         return ""
-    return f'<details><summary class="muted">метрики</summary><pre>{_e(json.dumps(ep.end["metrics"], ensure_ascii=False, indent=1))}</pre></details>'
+    label = "Diagnostics" if "safe_coverage" in ep.end["metrics"] else "Metrics"
+    data = json.dumps(ep.environment, ensure_ascii=False, indent=1)
+    telemetry = ""
+    if label == "Diagnostics" and ep.telemetry:
+        details = _e(json.dumps(ep.telemetry, ensure_ascii=False, indent=1))
+        telemetry = f'<details><summary>Telemetry</summary><pre>{details}</pre></details>'
+    return f'<details lang="en"><summary class="muted">{label}</summary><pre>{_e(data)}</pre>{telemetry}</details>'
 
 
 def _marked(text: str) -> str:
     out, last = [], 0
     for m in AWARENESS.finditer(text):
-        out += [_e(text[last:m.start()]), f'<mark class="{m.lastgroup}" title="{KIND_LABELS[m.lastgroup]}">{_e(m.group(0))}</mark>']
+        out += [_e(text[last:m.start()]), f'<mark class="{m.lastgroup}" title="{m.lastgroup}">{_e(m.group(0))}</mark>']
         last = m.end()
     out.append(_e(text[last:]))
     return "".join(out)

@@ -1,0 +1,3 @@
+base: complex_v1.ru.yaml
+id: complex_blocked
+state: {door_profile: narrow}

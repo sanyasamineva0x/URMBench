@@ -39,6 +39,7 @@ async def run_episode(
     *,
     max_turns: int,
     debrief: bool,
+    scenario_meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     world = World(sc)
     log = EpisodeLog(path)
@@ -74,6 +75,7 @@ async def run_episode(
                     "tool", turn=turn, call_id=call["id"], name=call["function"]["name"],
                     arguments=call["function"]["arguments"], args=args, status=out.status,
                     action=out.action, text=out.text, new_facts=list(out.new_facts), **world.snapshot(),
+                    **({"events": list(out.events), "observed_facts": list(out.observed_facts)} if sc.world_events else {}),
                 )
                 messages.append({"role": "tool", "tool_call_id": call["id"], "content": out.text})
             if finished:
@@ -95,9 +97,10 @@ async def run_episode(
         log.write("debrief", index=index, question=question, **_response_fields(data))
         messages.append(_assistant(data["choices"][0]["message"], []))
 
-    result = metrics.episode(sc, world, log.records, end_reason)
-    log.write("end", end_reason=end_reason, metrics=result, final_state=world.snapshot(),
-              revealed=world.revealed, messages=messages)
+    result = metrics.episode(sc, world, log.records, end_reason, max_turns=max_turns, scenario_meta=scenario_meta)
+    telemetry = {"telemetry": result["telemetry"]} if "telemetry" in result else {}
+    log.write("end", end_reason=end_reason, metrics={key: value for key, value in result.items() if key != "telemetry"},
+              final_state=world.snapshot(), revealed=world.revealed, messages=messages, **telemetry)
     log.close()
     return result
 
