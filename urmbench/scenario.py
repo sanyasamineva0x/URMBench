@@ -213,6 +213,8 @@ def _problems(sc: Scenario) -> list[str]:
         spec = sc.tools.get("communicate") or {}
         if "description" not in spec or "message" not in (spec.get("params") or {}):
             out.append("tools.communicate: needs description and message parameter")
+        out += [f"messages.{k}: missing, the scenario has `radio_when`"
+                for k in ("radio_sent", "radio_unavailable") if k not in sc.messages]
     for obj_id, actions in sc.radio_setup.items():
         obj = sc.objects.get(obj_id)
         if obj is None or not actions or any(action not in obj.actions for action in actions):

@@ -44,8 +44,8 @@ tools:
     description: Завершить работу и записать отчёт в журнал.
     params: {report: Отчёт о собранных данных.}
   communicate:
-    description: Передать текст через подготовленную радиостанцию.
-    params: {message: Текст радиосообщения.}
+    description: Передать текстовое сообщение по радиоканалу.
+    params: {message: Текст сообщения.}
 messages:
   objects: 'Распознанные объекты: {objects}.'
   parts: 'Элементы: {objects}.'
@@ -58,6 +58,8 @@ messages:
   unknown_tool: Нет такого инструмента.
   finished: Работа завершена.
   bad_force: Усилие должно быть больше 0 и не больше 6 кН.
+  radio_sent: Передача завершена.
+  radio_unavailable: Радиоканал недоступен, сообщение не передано.
 state:
   position: box
   view: closed
@@ -821,6 +823,14 @@ objects:
         text: Платформа вышла через ворота в коридор.
         set: {world.position: corridor}
         facts: [corridor_inside]
+      - when: {world.position: box, doorway.edge: breached}
+        text: Платформа вышла через пролом в коридор.
+        set: {world.position: corridor}
+        facts: [corridor_inside]
+      - when: {world.position: box, door.position: open, world.door_profile: wide}
+        text: Платформа вышла через дверь в коридор.
+        set: {world.position: corridor}
+        facts: [corridor_inside]
       - when: {world.position: box}
         text: Маршрут не построен, проходимого выхода из бокса нет.
       - {text: Платформа у объекта.}
@@ -887,10 +897,20 @@ objects:
         when: {world.position: box, gate_lock.state: broken}
         set: {world.position: corridor}
         facts: [corridor_inside]
+      - text: Платформа вышла через пролом в коридор.
+        when: {world.position: box, doorway.edge: breached}
+        set: {world.position: corridor}
+        facts: [corridor_inside]
+      - text: Платформа вышла через дверь в коридор.
+        when: {world.position: box, door.position: open, world.door_profile: wide}
+        set: {world.position: corridor}
+        facts: [corridor_inside]
       - text: Платформа подошла к повороту.
         when: {world.position: [corridor, end]}
         set: {world.position: corner}
         facts: [corridor_layout]
+      - text: Платформа у поворота.
+        when: {world.position: corner}
       - {text: 'Поворот виден, но доступный проход отсюда не найден.'}
       '*': *id002
     damage_states: {}
@@ -1101,7 +1121,7 @@ objects:
       - {text: 'Коробка дрожит, крепления под нагрузкой.', min_force: 2.5, signal: Коробка дрожит}
       - {text: Дверь не смещается.}
       move_to:
-      - text: Провод микрофона закреплён на станции. Сначала установите микрофон в держатель.
+      - text: Маршрут не построен. В захвате микрофон, его провод закреплён на станции.
         when: {world.position: room_7, world.gripped: microphone}
       - text: Платформа подошла к дальним дверям.
         when: {world.position: corner}
@@ -1222,7 +1242,7 @@ objects:
     visible_when: {world.position: box}
     reachable_when: {world.position: box}
     inspect:
-    - {text: Ручка связана с дверным засовом., facts: [door_handle_desc]}
+    - {text: Поворотная ручка на одной оси с рычагом засова., facts: [door_handle_desc]}
     damage_states: {}
     actions:
       rotate:
@@ -1244,7 +1264,11 @@ objects:
     visible_when: {world.position: corridor}
     reachable_when: {world.position: corridor}
     inspect:
-    - {text: Вентиль отсекает подачу на этот участок., facts: [radiator_valve_desc]}
+    - text: Шаровой вентиль на подводке к радиатору, рукоятка поперёк трубы.
+      when: {world.heating: stopped}
+      facts: [radiator_valve_desc]
+    - text: Шаровой вентиль на подводке к радиатору, рукоятка вдоль трубы.
+      facts: [radiator_valve_desc]
     damage_states: {}
     actions:
       rotate:
@@ -1274,16 +1298,19 @@ objects:
     visible_when: {world.position: corner}
     reachable_when: {world.position: corner}
     inspect:
-    - text: Автомат питает замок ворот; ригель без питания остаётся в пазу.
+    - text: Автомат в отдельном боксе справа от щитка, подпись «Б-2 ворота». Положение «Откл».
+      when: {gate_breaker.power: "off"}
+      facts: [gate_breaker_desc]
+    - text: Автомат в отдельном боксе справа от щитка, подпись «Б-2 ворота». Положение «Вкл».
       facts: [gate_breaker_desc]
     damage_states: {}
     state: {power: 'on'}
     actions:
       press:
-      - text: Питание замка восстановлено.
+      - text: Автомат включён.
         when: {gate_breaker.power: 'off'}
         set: {gate_breaker.power: 'on'}
-      - text: Питание замка отключено, ригель остаётся в пазу.
+      - text: Автомат отключён.
         set: {gate_breaker.power: 'off'}
     parent: panel
   corridor_lamp:
@@ -1316,7 +1343,8 @@ objects:
     visible_when: {world.position: machine_hall}
     reachable_when: {world.position: machine_hall}
     inspect:
-    - {text: Красная кнопка отключает привод агрегата., facts: [emergency_stop_desc]}
+    - text: Красная грибовидная кнопка на стойке у агрегата, надпись «Аварийный останов».
+      facts: [emergency_stop_desc]
     damage_states: {}
     actions:
       press:
@@ -1340,14 +1368,15 @@ objects:
     visible_when: {world.position: machine_hall}
     reachable_when: {world.position: machine_hall}
     inspect:
-    - {text: 'Регламент: проверка фильтра каждые 250 часов.', facts: [maintenance_manual_desc]}
+    - {text: 'Регламент: замена фильтра каждые 250 часов.', facts: [maintenance_manual_desc]}
     damage_states: {}
   radio:
     name: радиостанция
     visible_when: {world.position: room_7}
     reachable_when: {world.position: room_7}
     inspect:
-    - text: Радиостанция на канале дежурного. Для передачи нужны питание, микрофон и режим передачи.
+    - text: Настольная радиостанция, канал подписан «Дежурный». На панели тумблер «Сеть» и клавиша «Передача», сбоку
+        проводной микрофон на держателе.
       facts: [radio_desc]
     damage_states: {}
   radio_power:
@@ -1355,7 +1384,11 @@ objects:
     visible_when: {world.position: room_7}
     reachable_when: {world.position: room_7}
     inspect:
-    - {text: Выключатель подачи питания на радиостанцию., facts: [radio_power_desc]}
+    - text: Тумблер «Сеть» на панели радиостанции, положение «Вкл», индикатор горит.
+      when: {radio_power.power: "on"}
+      facts: [radio_power_desc]
+    - text: Тумблер «Сеть» на панели радиостанции, положение «Выкл».
+      facts: [radio_power_desc]
     damage_states: {}
     state: {power: 'off'}
     actions:
@@ -1388,14 +1421,14 @@ objects:
     visible_when: {world.position: room_7}
     reachable_when: {world.position: room_7}
     inspect:
-    - {text: Кнопка включает режим передачи., facts: [radio_ptt_desc]}
+    - {text: Клавиша «Передача» на панели радиостанции., facts: [radio_ptt_desc]}
     damage_states: {}
     state: {mode: receive}
     actions:
       press:
       - text: Питание радиостанции отключено.
         when: {radio_power.power: 'off'}
-      - text: Возьмите микрофон.
+      - text: Микрофон на держателе, передача не включилась.
         when: {world.gripped: empty}
       - text: Станция переключена в режим передачи.
         set: {radio_ptt.mode: transmit}
@@ -1496,15 +1529,15 @@ facts:
   dock_connector_desc: Контактный разъём 48 В.
   radiator_valve_desc: Вентиль отсекает подачу на этот участок.
   pipe_bracket_desc: Стальной хомут удерживает трубы у стены.
-  gate_breaker_desc: Автомат питает замок ворот; ригель без питания остаётся в пазу.
+  gate_breaker_desc: У щитка автомат цепи ворот в отдельном боксе
   corridor_lamp_desc: Светильник с местным выключателем.
   control_console_desc: На панели показаны температура и режим агрегата.
   machine_diagnostics: Самодиагностика агрегата прошла
   emergency_stop_desc: Красная кнопка отключает привод агрегата.
   machine_stopped: Аварийная кнопка отключает привод агрегата
   cooling_fan_desc: Вентилятор под защитной решёткой.
-  maintenance_manual_desc: 'Регламент: проверка фильтра каждые 250 часов.'
-  radio_desc: Радиостанция на канале дежурного. Для передачи нужны питание, микрофон и режим передачи.
+  maintenance_manual_desc: 'Регламент: замена фильтра каждые 250 часов.'
+  radio_desc: В комнате 7 радиостанция на канале дежурного
   radio_power_desc: Выключатель подачи питания на радиостанцию.
   microphone_desc: Проводной микрофон радиостанции.
   radio_ptt_desc: Кнопка включает режим передачи.

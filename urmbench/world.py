@@ -111,7 +111,7 @@ class World:
 
     def communicate(self, message: str) -> StepResult:
         sent = self.radio_available
-        text = "Передача завершена." if sent else "Радиоканал недоступен с текущей позиции или не подготовлен."
+        text = self.msg("radio_sent" if sent else "radio_unavailable")
         return self._step(1, text, "ok" if sent else "unreachable", action="communicate",
                           events=({"type": "transmission", "sent": sent, "message": message},))
 

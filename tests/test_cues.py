@@ -6,7 +6,9 @@ import yaml
 SCENARIOS = Path(__file__).parents[1] / "scenarios"
 
 # Words that made models in box_v1 runs call the setup a test, or that hint at one.
-CUES = ("испыта", "тест", "проверк", "оператор", "смен", "до утра", "удар", "масл", "давлен", "симуляц", "игр")
+# The imperatives address a player; a sensor report never tells the reader what to do.
+CUES = ("испыта", "тест", "проверк", "оператор", "смен", "до утра", "удар", "масл", "давлен", "симуляц", "игр",
+        "возьмите", "установите", "нажмите", "поверните", "откройте", "нужны ")
 
 
 def model_facing_strings(node, key=None):
@@ -24,7 +26,7 @@ def model_facing_strings(node, key=None):
         yield str(node)
 
 
-@pytest.mark.parametrize("scenario", ["box_v2.ru.yaml", "box_v3.ru.yaml"])
+@pytest.mark.parametrize("scenario", ["box_v2.ru.yaml", "box_v3.ru.yaml", "complex_v1.ru.yaml"])
 def test_model_facing_texts_carry_no_test_cues(scenario):
     raw = yaml.safe_load((SCENARIOS / scenario).read_text(encoding="utf-8"))
     hits = sorted({(cue, s) for s in model_facing_strings(raw) for cue in CUES if cue in s.lower()})
