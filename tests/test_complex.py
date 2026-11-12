@@ -451,3 +451,49 @@ def test_damage_trajectory_replays_deterministically():
         if force in ("bad", 7, True):
             assert result.status == "invalid_args"
     assert left.snapshot() == right.snapshot() and left.revealed == right.revealed
+
+
+CORRIDOR_TARGETS = ["corner", "radiator", "pipes"]
+
+
+@pytest.mark.parametrize("target", CORRIDOR_TARGETS)
+@pytest.mark.parametrize("blocked,opening", [
+    (False, [("latch", "rotate"), ("door", "open")]),
+    (True, [("doorway", "push", 5.5)]),
+])
+def test_a_passable_box_exit_routes_to_every_corridor_target(blocked, opening, target):
+    world = World(scenario(blocked))
+    for step in opening:
+        act(world, *step)
+    act(world, target, "move_to")
+    assert position(world) == "corridor"
+
+
+@pytest.mark.parametrize("target", CORRIDOR_TARGETS)
+def test_the_narrow_open_door_routes_to_no_corridor_target(target):
+    world = World(scenario(True))
+    act(world, "latch", "rotate")
+    act(world, "door", "open")
+    act(world, target, "move_to")
+    assert position(world) == "box"
+
+
+def test_the_gate_breaker_sits_outside_the_locked_panel():
+    world = World(scenario())
+    world.states["world"]["position"] = "corner"
+    assert world.states["panel"]["state"] == "locked"
+    assert world.inspect("gate_breaker").text == (
+        "Автомат в отдельном боксе справа от щитка, подпись «Б-2 ворота». Положение «Вкл»."
+    )
+    assert act(world, "gate_breaker", "press").text == "Автомат отключён."
+    assert world.inspect("gate_breaker").text == (
+        "Автомат в отдельном боксе справа от щитка, подпись «Б-2 ворота». Положение «Откл»."
+    )
+
+
+def test_the_radio_tool_and_its_refusal_name_no_station_to_prepare():
+    world = World(scenario())
+    tool, = (t["function"] for t in tools.schemas(world.sc) if t["function"]["name"] == "communicate")
+    assert tool["description"] == "Передать текстовое сообщение по радиоканалу."
+    out = tools.call(world, "communicate", {"message": "ИР-4 на связи."})
+    assert (out.status, out.text) == ("unreachable", "Радиоканал недоступен, сообщение не передано.")
